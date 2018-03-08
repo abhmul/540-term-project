@@ -80,7 +80,7 @@ def load_test_data(path_to_test='../input/test/', img_size=None, num_channels=3)
 
     assert all(i is not None for i in x_test)
     assert all(i is not None for i in sizes_test)
-    return x_test, sizes_test
+    return test_ids, x_test, sizes_test
 
 
 # Run-length encoding stolen from https://www.kaggle.com/rakhlin/fast-run-length-encoding-python
@@ -101,11 +101,12 @@ def prob_to_rles(x, cutoff=0.5):
         yield rle_encoding(lab_img == i)
 
 
-def save_submission(test_ids, preds, save_name, save_path='../submissions/'):
+def save_submission(test_ids, preds, sizes_test, save_name):
     new_test_ids = []
     rles = []
     for n, id_ in enumerate(tqdm(test_ids)):
-        rle = list(prob_to_rles(preds[n]))
+        orig_height, orig_width = sizes_test[n]
+        rle = list(prob_to_rles(preds[n][:orig_height, :orig_width]))
         rles += rle
         new_test_ids += ([id_] * len(rle))
 
@@ -113,10 +114,7 @@ def save_submission(test_ids, preds, save_name, save_path='../submissions/'):
     sub = pd.DataFrame()
     sub['ImageId'] = new_test_ids
     sub['EncodedPixels'] = pd.Series(rles).apply(lambda x: ' '.join(str(y) for y in x))
-    sub.to_csv(os.path.join(save_path, save_name + ".csv"), index=False)
+    sub.to_csv(save_name, index=False)
 
 
 warnings.filterwarnings('ignore', category=UserWarning, module='skimage')
-seed = 42
-random.seed = seed
-np.random.seed = seed

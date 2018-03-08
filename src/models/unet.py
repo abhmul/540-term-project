@@ -1,8 +1,12 @@
 import torch
 import torch.nn as nn
+from torch.autograd import Variable
+import numpy as np
 
 from pyjet.models import SLModel
 from pyjet.layers import MaskedLayer, Layer
+import pyjet.backend as J
+import pyjet.layers.functions as L
 
 from . import layer_loader
 
@@ -17,6 +21,12 @@ class EncoderBlock(Layer):
                          dim=2,
                          mask_value=prepool_mask_value) for conv in convs])
         self.pool = MaskedLayer(layer_loader.load_layer(**pool), dim=2, mask_value=0.0)
+
+    def calc_input_size(self, output_size):
+        output_size = self.pool.layer.calc_input_size(output_size)
+        for conv in self.convs:
+            output_size = conv.layer.calc_input_size(output_size)
+        return output_size
 
     def forward(self, x, seq_lens):
         for conv in self.convs:
@@ -78,6 +88,24 @@ class UNet(SLModel):
         self.encoder = nn.ModuleList([EncoderBlock(**encoder_block) for encoder_block in encoder])
         self.neck = Neck(neck)
         self.decoder = nn.ModuleList([DecoderBlock(**decoder_block) for decoder_block in decoder])
+        self.min_size = self.calc_input_size(1)
+
+    def calc_input_size(self, min_size):
+        for encoder_block in self.encoder:
+            min_size = encoder_block.calc_input_size(min_size)
+        return min_size
+
+    def cast_input_to_torch(self, x, volatile=False):
+        # Get the seq lens and pad it
+        seq_lens = J.LongTensor(
+            [[max(sample.shape[0], self.min_len), max(sample.shape[1], self.min_len)] for sample in x])
+        pad_shape, _ = seq_lens.max(dim=0)
+
+        x = np.stack([L.pad_numpy_to_shape(sample, shape=tuple(pad_shape)) for sample in x])
+        return Variable(J.from_numpy(x).float(), volatile=volatile), seq_lens
+
+    def cast_target_to_torch(self, y, volatile=False):
+        return self.cast_input_to_torch(y, volatile=volatile)[0]
 
     def forward(self, inputs):
         x, seq_lens = inputs
@@ -93,4 +121,5 @@ class UNet(SLModel):
             x, seq_lens = decoder_block(x, seq_lens, residual)
 
         self.loss_in = x
+        self.loss_kwargs["weight"] = L.create2d_mask(x, seq_lens)
         return x
