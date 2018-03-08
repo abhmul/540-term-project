@@ -19,44 +19,68 @@ def get_data_ids(path_to_data):
     return next(os.walk(path_to_data))[1]
 
 
-def load_train_data(path_to_train='../input/train/', img_size=(128, 128), num_channels=3):
-    img_height, img_width = img_size
+def load_img(path_to_img, img_size=None, num_channels=3):
+    img = imread(path_to_img)[:, :, :num_channels]
+    orig_img_shape = img.shape[:2]
+    # Resize to the input size
+    if img_size is not None:
+        img = resize(img, img_size, mode='constant', preserve_range=True).astype(np.uint8)
+    return img, orig_img_shape
+
+
+def load_mask(path_to_masks, img_size=None):
+    if img_size is None:
+        mask = None
+    else:
+        mask = np.zeros(img_size, dtype=np.bool)[..., np.newaxis]
+
+    for mask_file in next(os.walk(path_to_masks + '/masks/'))[2]:
+        mask_ = imread(path_to_masks + '/masks/' + mask_file)
+        # Initialize mask if we haven't yet
+        if mask is None:
+            mask = np.zeros(mask_.shape, dtype=np.bool)[..., np.newaxis]
+        if img_size is not None:
+            mask_ = resize(mask_, img_size, mode='constant', preserve_range=True)
+        mask_ = np.expand_dims(mask_, axis=-1)
+        # This will combine the masks
+        mask = np.maximum(mask, mask_).astype(np.bool)
+    return mask
+
+
+def load_train_data(path_to_train='../input/train/', img_size=None, num_channels=3):
     train_ids = get_data_ids(path_to_train)
-    x_train = np.zeros((len(train_ids), img_height, img_width, num_channels), dtype=np.uint8)
-    # These are the masks
-    y_train = np.zeros((len(train_ids), img_height, img_width, 1), dtype=np.bool)
+    x_train = [None for _ in train_ids]
+    y_train = [None for _ in train_ids]
+
     logging.info("Loading %s train images" % len(train_ids))
     for n, id_ in tqdm(enumerate(train_ids), total=len(train_ids)):
         # Get the path and read it
         path = path_to_train + id_
-        img = imread(path + '/images/' + id_ + '.png')[:, :, :num_channels]
-        # Resize to the input size
-        img = resize(img, (img_height, img_width), mode='constant', preserve_range=True)
-        x_train[n] = img
-        mask = np.zeros((img_height, img_width, 1), dtype=np.bool)
-        for mask_file in next(os.walk(path + '/masks/'))[2]:
-            mask_ = imread(path + '/masks/' + mask_file)
-            mask_ = np.expand_dims(resize(mask_, (img_height, img_width), mode='constant',
-                                          preserve_range=True), axis=-1)
-            # This will combine the masks
-            mask = np.maximum(mask, mask_)
-        y_train[n] = mask
+        path_to_img = path + '/images/' + id_ + '.png'
+        x_train[n], _ = load_img(path_to_img, img_size=img_size, num_channels=num_channels)
+        y_train[n] = load_mask(path, img_size=img_size)
+        assert x_train[n].shape == y_train[n].shape
+    # If we have a fixed image size, cast it to numpy
+    if img_size is not None:
+        x_train = np.stack(x_train)
+        y_train = np.stack(y_train)
     return train_ids, x_train, y_train
 
 
-def load_test_data(path_to_test='../input/test/', img_size=(128, 128), num_channels=3):
-    img_height, img_width = img_size
+def load_test_data(path_to_test='../input/test/', img_size=None, num_channels=3):
     test_ids = get_data_ids(path_to_test)
-    X_test = np.zeros((len(test_ids), img_height, img_width, num_channels), dtype=np.uint8)
-    sizes_test = []
+    x_test = [None for _ in test_ids]
+    sizes_test = [None for _ in test_ids]
     print('Getting and resizing test images ... ')
     sys.stdout.flush()
     for n, id_ in tqdm(enumerate(test_ids), total=len(test_ids)):
         path = path_to_test + id_
-        img = imread(path + '/images/' + id_ + '.png')[:, :, :num_channels]
-        sizes_test.append([img.shape[0], img.shape[1]])
-        img = resize(img, (img_height, img_width), mode='constant', preserve_range=True)
-        X_test[n] = img
+        path_to_img = path + '/images/' + id_ + '.png'
+        x_test[n], sizes_test[n] = load_img(path_to_img, img_size=img_size, num_channels=num_channels)
+
+    assert all(i is not None for i in x_test)
+    assert all(i is not None for i in sizes_test)
+    return x_test, sizes_test
 
 
 # Run-length encoding stolen from https://www.kaggle.com/rakhlin/fast-run-length-encoding-python
