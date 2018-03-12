@@ -6,7 +6,7 @@ import torch.optim as optim
 OPTIMIZERS = {
     "sgd": optim.SGD,
     "rmsprop": optim.RMSprop,
-    "adam": optim.adam
+    "adam": optim.Adam
 }
 
 CONFIG_JSON = "training/training_configurations.json"
@@ -27,13 +27,11 @@ def load_train_setup(train_id):
     epochs = config["epochs"]
 
     seed = config["seed"]
-    plot = config["plot"]
 
     return {"model": model,
             "optimizer": optimizer,
             "batch_size": batch_size,
             "epochs": epochs,
             "seed": seed,
-            "plot": plot,
             "kfold": config.get("kfold"),
             "img_size": config.get("img_size")}

@@ -15,7 +15,7 @@ class EncoderBlock(Layer):
 
     def __init__(self, convs, pool):
         super(EncoderBlock, self).__init__()
-        prepool_mask_value = 'min' if "max" in pool[0]["name"] else 0.0
+        prepool_mask_value = 'min' if "max" in pool["name"] else 0.0
         self.convs = nn.ModuleList(
             [MaskedLayer(layer_loader.load_layer(**conv),
                          dim=2,
@@ -54,6 +54,10 @@ class Neck(nn.Module):
         for layer in self.layers:
             x, seq_lens = layer(x, seq_lens)
         return x, seq_lens
+
+    def reset_parameters(self):
+        for layer in self.layers:
+            layer.reset_parameters()
 
 
 class DecoderBlock(nn.Module):
@@ -98,11 +102,10 @@ class UNet(SLModel):
     def cast_input_to_torch(self, x, volatile=False):
         # Get the seq lens and pad it
         seq_lens = J.LongTensor(
-            [[max(sample.shape[0], self.min_len), max(sample.shape[1], self.min_len)] for sample in x])
+            [[max(sample.shape[0], self.min_size), max(sample.shape[1], self.min_size)] for sample in x])
         pad_shape, _ = seq_lens.max(dim=0)
-
         x = np.stack([L.pad_numpy_to_shape(sample, shape=tuple(pad_shape)) for sample in x])
-        return Variable(J.from_numpy(x).float(), volatile=volatile), seq_lens
+        return Variable(J.from_numpy(x.astype(np.float)).float(), volatile=volatile), seq_lens
 
     def cast_target_to_torch(self, y, volatile=False):
         return self.cast_input_to_torch(y, volatile=volatile)[0]
@@ -123,3 +126,10 @@ class UNet(SLModel):
         self.loss_in = x
         self.loss_kwargs["weight"] = L.create2d_mask(x, seq_lens)
         return x
+
+    def reset_parameters(self):
+        for encoder_block in self.encoder:
+            encoder_block.reset_parameters()
+        self.neck.reset_parameters()
+        for decoder_block in self.decoder:
+            decoder_block.reset_parameters()

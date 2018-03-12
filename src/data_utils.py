@@ -33,9 +33,9 @@ def load_mask(path_to_masks, img_size=None):
         mask = None
     else:
         mask = np.zeros(img_size, dtype=np.bool)[..., np.newaxis]
-
-    for mask_file in next(os.walk(path_to_masks + '/masks/'))[2]:
-        mask_ = imread(path_to_masks + '/masks/' + mask_file)
+    mask_folder = os.path.join(path_to_masks, 'masks/')
+    for mask_file in next(os.walk(mask_folder))[2]:
+        mask_ = imread(os.path.join(mask_folder,  mask_file))
         # Initialize mask if we haven't yet
         if mask is None:
             mask = np.zeros(mask_.shape, dtype=np.bool)[..., np.newaxis]
@@ -55,16 +55,16 @@ def load_train_data(path_to_train='../input/train/', img_size=None, num_channels
     logging.info("Loading %s train images" % len(train_ids))
     for n, id_ in tqdm(enumerate(train_ids), total=len(train_ids)):
         # Get the path and read it
-        path = path_to_train + id_
-        path_to_img = path + '/images/' + id_ + '.png'
+        path = os.path.join(path_to_train, id_)
+        path_to_img = os.path.join(path, 'images/', id_ + '.png')
         x_train[n], _ = load_img(path_to_img, img_size=img_size, num_channels=num_channels)
         y_train[n] = load_mask(path, img_size=img_size)
-        assert x_train[n].shape == y_train[n].shape
+        assert x_train[n].shape[:2] == y_train[n].shape[:2]
     # If we have a fixed image size, cast it to numpy
     if img_size is not None:
         x_train = np.stack(x_train)
         y_train = np.stack(y_train)
-    return train_ids, x_train, y_train
+    return np.array(train_ids), np.array(x_train), np.array(y_train)
 
 
 def load_test_data(path_to_test='../input/test/', img_size=None, num_channels=3):
@@ -74,13 +74,13 @@ def load_test_data(path_to_test='../input/test/', img_size=None, num_channels=3)
     print('Getting and resizing test images ... ')
     sys.stdout.flush()
     for n, id_ in tqdm(enumerate(test_ids), total=len(test_ids)):
-        path = path_to_test + id_
-        path_to_img = path + '/images/' + id_ + '.png'
+        path = os.path.join(path_to_test, id_)
+        path_to_img = os.path.join(path, 'images/', id_ + '.png')
         x_test[n], sizes_test[n] = load_img(path_to_img, img_size=img_size, num_channels=num_channels)
 
     assert all(i is not None for i in x_test)
     assert all(i is not None for i in sizes_test)
-    return test_ids, x_test, sizes_test
+    return np.array(test_ids), np.array(x_test), np.array(sizes_test)
 
 
 # Run-length encoding stolen from https://www.kaggle.com/rakhlin/fast-run-length-encoding-python

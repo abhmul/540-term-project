@@ -19,8 +19,12 @@ parser = argparse.ArgumentParser(description='Run the models.')
 parser.add_argument('train_id', help='ID of the train configuration')
 parser.add_argument('--train', action="store_true", help="Whether to run this script to train a model")
 parser.add_argument('--test', action="store_true", help="Whether to run this script to generate submissions")
+parser.add_argument('--plot', action="store_true", help="Whether to plot the training loss")
 parser.add_argument('--num_completed', type=int, default=0, help="How many completed folds")
 
+logging.basicConfig(format='%(asctime)s : %(levelname)s : %(message)s', level=logging.INFO)
+
+PLOT = False
 
 def create_filenames(train_id):
     model_file = safe_open_dir("../models/") + train_id + ".state"
@@ -95,7 +99,7 @@ def kfold(dataset, config, train_id, num_completed=0):
     best_vals = []
 
     completed = set(range(num_completed))
-    for i, (train_data, val_data) in enumerate(dataset.kfold(k=args.kfold, shuffle=True, seed=np.random.randint(2 ** 32))):
+    for i, (train_data, val_data) in enumerate(dataset.kfold(k=config["kfold"], shuffle=True, seed=np.random.randint(2 ** 32))):
         if i in completed:
             continue
         logging.info("Training Fold%s" % (i + 1))
@@ -104,7 +108,7 @@ def kfold(dataset, config, train_id, num_completed=0):
         model, tr_logs, val_logs = train_model(model, train_id, config["optimizer"],
                                                train_data, val_data,
                                                epochs=config["epochs"], batch_size=config["batch_size"],
-                                               plot=config["plot"], load_model=False)
+                                               plot=PLOT, load_model=False)
         best_vals.append(min(val_logs['loss']))
 
     logging.info("Average val loss: %s" % (sum(best_vals) / len(best_vals)))
@@ -134,19 +138,20 @@ if __name__ == "__main__":
     # Load the train_config
     train_config = load_train_setup(args.train_id)
     trained_model = None
+    PLOT = args.plot
     if args.train:
         # Load the train data
-        train_ids, x_train, y_train = dsb.load_train_data(path_to_train="../input/train",
+        train_ids, x_train, y_train = dsb.load_train_data(path_to_train="../input/train/",
                                                           img_size=train_config["img_size"], num_channels=3)
         train_dataset = NpDataset(x=x_train, y=y_train, ids=train_ids)
         # train the models
         if not train_config["kfold"]:
             raise NotImplementedError("Non-kfold training is not implemented")
-        trained_model = kfold(x_train, y_train, train_config)
+        trained_model = kfold(train_dataset, train_config, args.train_id, num_completed=args.num_completed)
 
     if args.test:
         # Load the test data
-        test_ids, x_test, sizes_test = dsb.load_test_data(path_to_test="../input/test",
+        test_ids, x_test, sizes_test = dsb.load_test_data(path_to_test="../input/test/",
                                                           img_size=train_config["img_size"], num_channels=3)
         test_dataset = NpDataset(x=x_test, ids=test_ids)
         test(test_dataset, sizes_test, train_config, args.train_id, model=trained_model)

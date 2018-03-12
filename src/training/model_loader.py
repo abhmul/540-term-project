@@ -11,8 +11,8 @@ with open(CONFIG_JSON, 'r') as config_json_file:
     CONFIGS = json.load(config_json_file)
 
 
-def build_model(model_name, **kwargs):
-    return MODELS[model_name](**kwargs)
+def build_model(name, **kwargs):
+    return MODELS[name](**kwargs)
 
 
 def load_model(model_id):

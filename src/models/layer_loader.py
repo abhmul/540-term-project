@@ -7,5 +7,5 @@ LAYERS = {
 }
 
 
-def load_layer(layer_name, **kwargs):
-    return LAYERS[layer_name](**kwargs)
+def load_layer(name, **kwargs):
+    return LAYERS[name](**kwargs)
