@@ -11,6 +11,10 @@ import pyjet.layers.functions as L
 from . import layer_loader
 
 
+def next_power(num, power):
+    return num + num % (2 ** power)
+
+
 class EncoderBlock(Layer):
 
     def __init__(self, convs, pool):
@@ -104,6 +108,8 @@ class UNet(SLModel):
         seq_lens = J.LongTensor(
             [[max(sample.shape[0], self.min_size), max(sample.shape[1], self.min_size)] for sample in x])
         pad_shape, _ = seq_lens.max(dim=0)
+        # Simple hack to allow for images to fully resize at the same sizes as the encoder
+        pad_shape = next_power(pad_shape, len(self.encoder))
         x = np.stack([L.pad_numpy_to_shape(sample, shape=tuple(pad_shape)) for sample in x])
         return Variable(J.from_numpy(x.astype(np.float)).float(), volatile=volatile), seq_lens
 
