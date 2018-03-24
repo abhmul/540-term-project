@@ -1,0 +1,60 @@
+Epoch: 0
+Train
+	loss: 0.0038306459393777966
+Val
+	loss: 9.735332423588261e-05
+
+Epoch: 1
+Train
+	loss: 3.9031228818209124e-05
+Val
+	loss: 1.531262205389794e-05
+
+Epoch: 2
+Train
+	loss: 9.330647789861503e-06
+Val
+	loss: 5.662506282533286e-06
+
+Epoch: 3
+Train
+	loss: 3.966454286490391e-06
+Val
+	loss: 2.776841256491025e-06
+
+Epoch: 4
+Train
+	loss: 2.1554368668239024e-06
+Val
+	loss: 1.7287272839894285e-06
+
+Epoch: 5
+Train
+	loss: 1.3914535761659637e-06
+Val
+	loss: 9.800701263884548e-07
+
+Epoch: 6
+Train
+	loss: 8.101784322766668e-07
+Val
+	loss: 6.806047281315841e-07
+
+Epoch: 7
+Train
+	loss: 6.543060611012524e-07
+Val
+	loss: 6.125447953309049e-07
+
+Epoch: 8
+Train
+	loss: 5.299690797315033e-07
+Val
+	loss: 4.3558770812524017e-07
+
+Epoch: 9
+Train
+	loss: 3.578202274416426e-07
+Val
+	loss: 1.7695769827241747e-07
+

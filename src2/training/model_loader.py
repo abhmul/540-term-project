@@ -1,9 +1,9 @@
 import json
 
-from models import keras_unet
+from models import unet
 
 MODELS = {
-    "unet": keras_unet.unet
+    "unet": unet.UNet
 }
 
 CONFIG_JSON = "training/model_configurations.json"

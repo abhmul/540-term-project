@@ -3,11 +3,15 @@ import logging
 import os
 
 import numpy as np
-from keras.callbacks import ModelCheckpoint
-from pyjet.data import NpDataset, DatasetGenerator
+from scipy.special import expit
+import torch
+from torch.nn.functional import binary_cross_entropy_with_logits
+
+import pyjet.backend as J
+from pyjet.callbacks import ModelCheckpoint, Plotter, MetricLogger, ReduceLROnPlateau
+from pyjet.data import DatasetGenerator, NpDataset
 
 from training import load_model, load_train_setup
-from models.model_utils import reset_model
 import data_utils as dsb
 from utils import safe_open_dir
 
@@ -31,7 +35,7 @@ def create_filenames(train_id):
     return model_file, log_file, plot_file, submission_file
 
 
-def train_model(model, train_id, train_data, val_data, epochs=10, batch_size=32, plot=False, load_model=False):
+def train_model(model, train_id, optimizer, train_data, val_data, epochs=10, batch_size=32, plot=False, load_model=False):
     logging.info("Train Data: %s samples" % len(train_data))
     logging.info("Val Data: %s samples" % len(val_data))
 
@@ -41,35 +45,48 @@ def train_model(model, train_id, train_data, val_data, epochs=10, batch_size=32,
     model_file, log_file, plot_file, _ = create_filenames(train_id)
 
     # callbacks
-    best_model = ModelCheckpoint(model_file, monitor="val_loss", verbose=1, save_best_only=True, save_weights_only=True)
-    callbacks = [best_model]
+    best_model = ModelCheckpoint(model_file, monitor="loss", verbose=1, save_best_only=True)
+    log_to_file = MetricLogger(log_file)
+    callbacks = [best_model, log_to_file]
     # This will plot the losses while training
     if plot:
-        raise NotImplementedError("Plotting")
+        loss_plotter = Plotter(monitor='loss', scale='log', save_to_file=plot_file, block_on_end=False)
+        callbacks.append(loss_plotter)
 
     # Setup the weights
     if load_model:
         logging.info("Loading the model from %s to resume training" % model_file)
-        model.load_weights(model_file)
+        model.load_state(model_file)
     else:
         logging.info("Resetting model parameters")
-        reset_model(model)
+        model.reset_parameters()
+
+    # And the optimizer
+    optimizer = optimizer([param for param in model.parameters() if param.requires_grad])
+
+    loss = binary_cross_entropy_with_logits
 
     # And finally train
-    history = model.fit_generator(traingen, steps_per_epoch=traingen.steps_per_epoch,
-                                  epochs=epochs, callbacks=callbacks,
-                                  validation_data=valgen,
-                                  validation_steps=valgen.steps_per_epoch)
+    tr_logs, val_logs = model.fit_generator(traingen, steps_per_epoch=traingen.steps_per_epoch,
+                                            epochs=epochs, callbacks=callbacks, optimizer=[optimizer],
+                                            loss_fn=loss, validation_generator=valgen,
+                                            validation_steps=valgen.steps_per_epoch)
 
-    return model, history
+    # Clear the memory associated with models and optimizers
+    del optimizer
+    del callbacks
+    if J.use_cuda:
+        torch.cuda.empty_cache()
+
+    return model, tr_logs, val_logs
 
 
 # TODO Add test augmentation to this
-def test_model(model, train_id, test_data, batch_size):
+def test_model(model, train_id, test_data, batch_size, augmenter=None):
     testgen = DatasetGenerator(test_data, batch_size=batch_size, shuffle=False)
     model_file, _, _, _ = create_filenames(train_id)
     # Initialize the model
-    model.load_weights(model_file)
+    model.load_state(model_file)
 
     # Get the predictions
     return model.predict_generator(testgen, testgen.steps_per_epoch, verbose=1)
@@ -81,6 +98,7 @@ def kfold(dataset, config, train_id, num_completed=0):
     logging.info("Total Data: %s samples" % len(dataset))
     logging.info("Running %sfold validation" % config["kfold"])
     best_vals = []
+
     completed = set(range(num_completed))
     for i, (train_data, val_data) in enumerate(dataset.kfold(k=config["kfold"], shuffle=True, seed=np.random.randint(2 ** 32))):
         if i in completed:
@@ -88,11 +106,11 @@ def kfold(dataset, config, train_id, num_completed=0):
         logging.info("Training Fold%s" % (i + 1))
         train_id = train_id + "_fold%s" % i
         # TODO add load model functinoality
-        model, history = train_model(model, train_id,
-                                     train_data, val_data,
-                                     epochs=config["epochs"], batch_size=config["batch_size"],
-                                     plot=PLOT, load_model=False)
-        best_vals.append(min(history.history['val_loss']))
+        model, tr_logs, val_logs = train_model(model, train_id, config["optimizer"],
+                                               train_data, val_data,
+                                               epochs=config["epochs"], batch_size=config["batch_size"],
+                                               plot=PLOT, load_model=False)
+        best_vals.append(min(val_logs['loss']))
 
     logging.info("Average val loss: %s" % (sum(best_vals) / len(best_vals)))
     return model
@@ -103,18 +121,17 @@ def test(dataset, test_img_sizes, config, train_id, model=None):
         model = load_model(config["model"])
 
     if not config["kfold"]:
-        predictions = test_model(model, train_id, dataset, config["batch_size"])
-    else:
-        predictions = 0.
-        for i in range(config["kfold"]):
-            logging.info("Predicting fold %s/%s" % (i+1, config["kfold"]))
-            predictions = predictions + test_model(model, train_id + "_fold%s" % i, dataset, config["batch_size"])
-        predictions = predictions / config["kfold"]
+        raise NotImplementedError("Non-kfold testing is not implemented")
+
+    predictions = 0.
+    for i in range(config["kfold"]):
+        logging.info("Predicting fold %s/%s" % (i+1, config["kfold"]))
+        predictions = predictions + test_model(model, train_id + "_fold%s" % i, dataset, config["batch_size"])
+    predictions = predictions / config["kfold"]
 
     _, _, _, submission_file = create_filenames(train_id)
     # Make the submission
-    dsb.save_submission(dataset.ids, predictions, test_img_sizes, submission_file,
-                        resize_img=config["img_size"] is not None)
+    dsb.save_submission(dataset.ids, expit(predictions), test_img_sizes, submission_file)
 
 
 if __name__ == "__main__":

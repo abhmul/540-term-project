@@ -1,7 +1,8 @@
 {
   "train-unet-0": {
     "model_id": "unet-0",
-    "batch_size": 16,
+    "optimizer": {"name": "adam"},
+    "batch_size": 1,
     "epochs": 10,
     "seed": 7,
     "kfold": 10,
