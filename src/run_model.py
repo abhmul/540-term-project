@@ -5,6 +5,7 @@ import os
 import numpy as np
 from keras.callbacks import ModelCheckpoint
 from pyjet.data import NpDataset, DatasetGenerator
+from pyjet.preprocessing.image import ImageDataGenerator
 
 from training import load_model, load_train_setup
 from models.model_utils import reset_model
@@ -121,6 +122,8 @@ if __name__ == "__main__":
     args = parser.parse_args()
     # Load the train_config
     train_config = load_train_setup(args.train_id)
+    # Seed the random generator
+    np.random.seed(train_config["seed"])
     trained_model = None
     PLOT = args.plot
     if args.train:
