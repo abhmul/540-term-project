@@ -100,10 +100,10 @@ ENV/
 # mypy
 .mypy_cache/
 
-\.idea/
+/.idea/
 
-\input/
+/input/
 
-\models/
+/models/
 
-\submissions/
+/submissions/
