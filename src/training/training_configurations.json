@@ -26,13 +26,13 @@
       "horizontal_flip": true,
       "vertical_flip": true
     },
-    "augment_times": 10,
+    "augment_times": 0,
     "img_mode": "ycbcr"
   },
 
   "train-unet-2": {
     "model_id": "unet-1",
-    "batch_size": 16,
+    "batch_size": 8,
     "epochs": 100,
     "seed": 7,
     "kfold": 10,

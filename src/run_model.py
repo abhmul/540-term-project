@@ -2,8 +2,10 @@ import argparse
 import logging
 import os
 from pprint import pprint
+import pickle as pkl
 
 import numpy as np
+from sklearn.metrics import jaccard_similarity_score
 from keras.callbacks import ModelCheckpoint
 from keras.models import load_model as reload_model_checkpoint
 from pyjet.data import NpDataset, DatasetGenerator
@@ -21,8 +23,9 @@ parser.add_argument('--test', action="store_true", help="Whether to run this scr
 parser.add_argument('--plot', action="store_true", help="Whether to plot the training loss")
 parser.add_argument('--num_completed', type=int, default=0, help="How many completed folds")
 parser.add_argument('--reload_model', action='store_true', help="Continues training from a saved model")
-parser.add_argument('--cutoff', type=float, default=0, help="Cutoff to use for producing submission")
+parser.add_argument('--cutoff', type=float, default=0.5, help="Cutoff to use for producing submission")
 parser.add_argument('--use_iou', action='store_true', help="creates test predictions with iou checkpointed model.")
+parser.add_argument('--test_debug', action='store_true', help="debugs the test output.")
 
 logging.basicConfig(format='%(asctime)s : %(levelname)s : %(message)s', level=logging.INFO)
 
@@ -36,7 +39,34 @@ def create_filenames(train_id):
     log_file = os.path.join(safe_open_dir("../logs/"), train_id + ".txt")
     plot_file = os.path.join(safe_open_dir('../plots/'), 'loss_' + train_id + ".png")
     submission_file = os.path.join(safe_open_dir('../submissions/'), train_id + ".csv")
-    return model_file, model_iou_file, log_file, plot_file, submission_file
+    cache_file = os.path.join(safe_open_dir('../caches/'), train_id + ".pkl")
+    return model_file, model_iou_file, log_file, plot_file, submission_file, cache_file
+
+
+def save_cache(cache, cache_filename):
+    with open(cache_filename, "wb") as cache_file:
+        logging.info("Saving cache to %s" % cache_filename)
+        pkl.dump(cache, cache_file)
+
+
+def build_cache(train_id, model=None, config=None, val_data: NpDataset=None):
+    # First try to load the cache
+    model_file, model_iou_file, log_file, plot_file, submission_file, cache_file = create_filenames(train_id)
+    try:
+        with open(cache_file, "rb") as cache_file_obj:
+            cache = pkl.load(cache_file_obj)
+        logging.info("Loaded cache from %s" % cache_file)
+    except FileNotFoundError:
+        logging.info("Could not load cache, constructing")
+        orig_output_labels = val_data.output_labels
+        val_data.output_labels = False
+        cache = {}
+        cache["preds"] = test_model(model, train_id, val_data, batch_size=config["batch_size"])
+        cache["iou_preds"] = test_model(model, train_id, val_data, batch_size=config["batch_size"], use_iou=True)
+        cache["labels"] = val_data.y
+        save_cache(cache, cache_file)
+        val_data.output_labels = orig_output_labels
+    return cache
 
 
 def train_model(model, train_id, train_data, val_data, epochs=10, batch_size=32, plot=False, reload_model=False,
@@ -67,7 +97,7 @@ def train_model(model, train_id, train_data, val_data, epochs=10, batch_size=32,
         #     plt.show()
         #     raise ValueError()
 
-    model_file, model_iou_file, log_file, plot_file, _ = create_filenames(train_id)
+    model_file, model_iou_file, log_file, plot_file, _, cache_file, *other_filenames = create_filenames(train_id)
 
     # callbacks
     best_model = ModelCheckpoint(model_file, monitor="val_loss", verbose=1, save_best_only=True, save_weights_only=True)
@@ -95,12 +125,25 @@ def train_model(model, train_id, train_data, val_data, epochs=10, batch_size=32,
                                   validation_data=valgen,
                                   validation_steps=valgen.steps_per_epoch)
 
-    return model, history
+    # Get the validation weights
+    logging.info("Calculating validation predictions")
+    cache = {}
+    model.load_weights(model_file)
+    cache["preds"] = model.predict_generator(valgen, steps=valgen.steps_per_epoch)
+    model.load_weights(model_iou_file)
+    cache["iou_preds"] = model.predict_generator(valgen, steps=valgen.steps_per_epoch)
+    cache["labels"] = val_data.y
+    cache["history"] = history.history
+
+    # Save the cache
+    save_cache(cache, cache_file)
+
+    return model, history, cache
 
 
 def test_model(model, train_id, test_data, batch_size, augment=None, augment_times=None, use_iou=False):
     testgen = DatasetGenerator(test_data, batch_size=batch_size, shuffle=False)
-    model_file, model_iou_file, _, _, _ = create_filenames(train_id)
+    model_file, model_iou_file, *args = create_filenames(train_id)
     if use_iou:
         logging.info("Creating test predictions with model checkpointed with mean iou.")
         model_file = model_iou_file
@@ -108,17 +151,48 @@ def test_model(model, train_id, test_data, batch_size, augment=None, augment_tim
     model.load_weights(model_file)
 
     # Get the predictions
-    if augment is None or augment_times is None:
+    if augment is None or augment_times == 0:
         return model.predict_generator(testgen, testgen.steps_per_epoch, verbose=1)
     else:
         logging.info("Using test augmentation with settings:")
         pprint(augment)
         logging.info("Evaluating %s times" % augment_times)
-        testgen = ImageDataGenerator(testgen, labels=False, augment_masks=False, **augment)
+        testgen = ImageDataGenerator(testgen, labels=False, augment_masks=False, save_inverses=True, **augment)
         preds = 0
+        averaging_array = None
         for i in range(augment_times):
-            preds += model.predict_generator(testgen, testgen.steps_per_epoch, verbose=1)
-        return preds / augment_times
+            # Need to use max_q_size as 1 to not sample too much from testgen
+            aug_preds = model.predict_generator(testgen, testgen.steps_per_epoch, verbose=1)
+            orig_preds = testgen.invert_images(aug_preds)
+            # Use this to not drive padded regions down
+            if averaging_array is None:
+                averaging_array = np.zeros(orig_preds.shape)
+            averaging_array += (orig_preds > 0.005).astype(np.float)
+            preds += orig_preds
+            assert preds.shape[1:] == (256, 256, 1), "Preds shape is incorrect {}".format(preds.shape)
+        # Set everywhere where the averaging constant is 0 to 1, so no divide by zero
+        averaging_array[averaging_array == 0] = 1.
+        return preds / averaging_array
+
+
+def cross_validate_cutoff(preds, labels, train_id):
+    cutoffs = np.linspace(0., 1., 100)
+    scores = []
+    for cutoff in cutoffs:
+        thresholded = (preds > cutoff).squeeze()
+        assert thresholded.ndim == 3
+        labels = labels.reshape(thresholded.shape)
+        scores.append(np.average([jaccard_similarity_score(l, t) for l, t in zip(labels, thresholded)]))
+    scores = np.asarray(scores, dtype=np.float)
+    if PLOT:
+        import matplotlib.pyplot as plt
+        plt.plot(cutoffs, scores)
+        plt.savefig("../plots/cutoffs_" + train_id + ".png")
+
+    # Maximize the score
+    cutoff_ind = np.argmax(scores)
+    logging.info("Best score achieved: %s" % scores[cutoff_ind])
+    return cutoffs[cutoff_ind]
 
 
 def train(dataset, config, train_id, reload_model=False):
@@ -130,17 +204,25 @@ def train(dataset, config, train_id, reload_model=False):
 
     train_data, val_data = dataset.validation_split(split=config["split"], shuffle=True, seed=np.random.randint(2 ** 32))
 
-    model, history = train_model(model, train_id,
-                                 train_data, val_data,
-                                 epochs=config["epochs"], batch_size=config["batch_size"],
-                                 plot=PLOT, augment=config["augment"],
-                                 reload_model=reload_model)
+    model, history, cache = train_model(model, train_id,
+                                        train_data, val_data,
+                                        epochs=config["epochs"], batch_size=config["batch_size"],
+                                        plot=PLOT, augment=config["augment"],
+                                        reload_model=reload_model)
     best_val = min(history.history['val_loss'])
     best_mean_iou = min(history.history['val_mean_iou'])
 
     logging.info("Best val loss: %s" % best_val)
     logging.info("Best val mean iou: %s" % best_mean_iou)
-    return model
+
+    # Cross validate cutoffs
+    best_cutoff = cross_validate_cutoff(cache["preds"], cache["labels"], train_id)
+    best_iou_cutoff = cross_validate_cutoff(cache["iou_preds"], cache["labels"], train_id + "_iou")
+
+    logging.info("Best cutoff for loss checkpointed model: %s" % best_cutoff)
+    logging.info("Best cutoff for iou checkpointed model: %s" % best_iou_cutoff)
+
+    return model, {"cutoff": best_cutoff, "iou_cutoff": best_iou_cutoff}
 
 
 def kfold(dataset, config, train_id, num_completed=0, reload_model=False):
@@ -152,27 +234,49 @@ def kfold(dataset, config, train_id, num_completed=0, reload_model=False):
     best_vals = []
     best_mean_ious = []
     completed = set(range(num_completed))
+    caches = []
     for i, (train_data, val_data) in enumerate(dataset.kfold(k=config["kfold"], shuffle=True, seed=np.random.randint(2 ** 32))):
-        if i in completed:
-            continue
         logging.info("Training Fold%s" % (i + 1))
         fold_train_id = train_id + "_fold%s" % i
-        model, history = train_model(model, fold_train_id,
-                                     train_data, val_data,
-                                     epochs=config["epochs"], batch_size=config["batch_size"],
-                                     plot=PLOT, augment=config["augment"],
-                                     reload_model=reload_model)
+        if i in completed:
+            # Build the cache
+            caches.append(build_cache(fold_train_id, model, config, val_data))
+            continue
+        model, history, cache = train_model(model, fold_train_id,
+                                            train_data, val_data,
+                                            epochs=config["epochs"], batch_size=config["batch_size"],
+                                            plot=PLOT, augment=config["augment"],
+                                            reload_model=reload_model)
         # Set to false for the next time
         reload_model = False
         best_vals.append(min(history.history['val_loss']))
         best_mean_ious.append(min(history.history['val_mean_iou']))
+        caches.append(cache)
 
-    logging.info("Average val loss: %s" % (sum(best_vals) / len(best_vals)))
-    logging.info("Average val mean iou: %s" % (sum(best_mean_ious) / len(best_mean_ious)))
-    return model
+        # Reset the model
+        model = None
+        model = load_model(config["model"], img_size=config["img_size"], max_val=config["max_val"],
+                           num_channels=config["num_channels"])
+
+    if len(best_vals) != 0:
+        logging.info("Average val loss: %s" % (sum(best_vals) / len(best_vals)))
+        logging.info("Average val mean iou: %s" % (sum(best_mean_ious) / len(best_mean_ious)))
+
+    cache = {"preds": np.concatenate([c["preds"] for c in caches], axis=0),
+             "iou_preds": np.concatenate([c["iou_preds"] for c in caches], axis=0),
+             "labels": np.concatenate([c["labels"] for c in caches], axis=0), }
+
+    best_cutoff = cross_validate_cutoff(cache["preds"], cache["labels"], train_id)
+    best_iou_cutoff = cross_validate_cutoff(cache["iou_preds"], cache["labels"], train_id + "_iou")
+
+    logging.info("Best cutoff for loss checkpointed model: %s" % best_cutoff)
+    logging.info("Best cutoff for iou checkpointed model: %s" % best_iou_cutoff)
+
+    return model, {"cutoff": best_cutoff, "iou_cutoff": best_iou_cutoff}
 
 
-def test(dataset, test_img_sizes, config, train_id, model=None, use_iou=False):
+def test(dataset, test_img_sizes, config, train_id, model=None, use_iou=False, cutoff=0.5,
+         test_debug=False):
     if model is None:
         model = load_model(config["model"], img_size=config["img_size"], max_val=config["max_val"],
                            num_channels=config["num_channels"])
@@ -189,10 +293,21 @@ def test(dataset, test_img_sizes, config, train_id, model=None, use_iou=False):
                                                    use_iou=use_iou)
         predictions = predictions / config["kfold"]
 
-    _, _, _, _, submission_file = create_filenames(train_id)
+    if test_debug:
+        try:
+            import matplotlib.pyplot as plt
+            for i, pred in enumerate(predictions.squeeze()):
+                plt.imshow(pred, cmap="gray")
+                plt.title(dataset.ids[i])
+                plt.show()
+        except KeyboardInterrupt:
+            pass
+
+    _, _, _, _, submission_file, *args = create_filenames(train_id)
     # Make the submission
+    logging.info("Using cutoff %s" % cutoff)
     dsb.save_submission(dataset.ids, predictions, test_img_sizes, submission_file,
-                        resize_img=config["img_size"] is not None)
+                        resize_img=config["img_size"] is not None, cutoff=cutoff)
 
 
 if __name__ == "__main__":
@@ -215,6 +330,8 @@ if __name__ == "__main__":
     # Image loading and other setup values
     train_config["num_channels"] = 1 if train_config["img_mode"] == "gray" else 3
     train_config["max_val"] = 235. if train_config["img_mode"] == "ycbcr" else 255.
+    train_cache = None
+
 
     logging.info("Training configuration is:")
     pprint(train_config)
@@ -228,9 +345,9 @@ if __name__ == "__main__":
         train_dataset = NpDataset(x=x_train, y=y_train, ids=train_ids)
         # train the models
         if not train_config["kfold"]:
-            trained_model = train(train_dataset, train_config, args.train_id, reload_model=args.reload_model)
+            trained_model, train_cache = train(train_dataset, train_config, args.train_id, reload_model=args.reload_model)
         else:
-            trained_model = kfold(train_dataset, train_config, args.train_id, num_completed=args.num_completed,
+            trained_model, train_cache = kfold(train_dataset, train_config, args.train_id, num_completed=args.num_completed,
                                   reload_model=args.reload_model)
 
     if args.test:
@@ -240,7 +357,13 @@ if __name__ == "__main__":
                                                           num_channels=train_config["num_channels"],
                                                           mode=train_config["img_mode"])
         test_dataset = NpDataset(x=x_test, ids=test_ids)
-        test(test_dataset, sizes_test, train_config, args.train_id, model=trained_model)
+        if train_cache is None:
+            cutoff = args.cutoff
+        else:
+            cutoff = train_cache["iou_cutoff"] if args.use_iou else train_cache["cutoff"]
+
+        test(test_dataset, sizes_test, train_config, args.train_id, model=trained_model, use_iou=args.use_iou,
+             cutoff=cutoff, test_debug=args.test_debug)
 
 
 
