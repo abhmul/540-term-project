@@ -9,6 +9,7 @@ import pandas as pd
 
 from tqdm import tqdm
 from skimage.io import imread
+from skimage.color import rgb2ycbcr, rgb2gray
 from skimage.transform import resize
 from skimage.morphology import label
 
@@ -19,8 +20,28 @@ def get_data_ids(path_to_data):
     return next(os.walk(path_to_data))[1]
 
 
-def load_img(path_to_img, img_size=None, num_channels=3):
+def normalize(img, max_val=255):
+    mean = np.average(img)
+    if mean > (max_val / 2):
+        return max_val - img
+    return img
+
+
+def load_img(path_to_img, img_size=None, num_channels=3, mode="ycbcr", normalize_img=True):
     img = imread(path_to_img)[:, :, :num_channels]
+    if normalize_img:
+        img = normalize(img)
+    if mode == "rgb":
+        pass
+    elif mode == "ycbcr":
+        img = rgb2ycbcr(img)
+    elif mode == "gray":
+        assert (num_channels == 1)
+        img = rgb2gray(img)[:, :, np.newaxis]
+    else:
+        raise NotImplementedError("Image mode %s" % mode)
+
+
     orig_img_shape = img.shape[:2]
     # Resize to the input size
     if img_size is not None:
@@ -47,17 +68,17 @@ def load_mask(path_to_masks, img_size=None):
     return mask
 
 
-def load_train_data(path_to_train='../input/train/', img_size=None, num_channels=3):
+def load_train_data(path_to_train='../input/train/', img_size=None, num_channels=3, mode="ycbcr"):
     train_ids = get_data_ids(path_to_train)
     x_train = [None for _ in train_ids]
     y_train = [None for _ in train_ids]
 
-    logging.info("Loading %s train images" % len(train_ids))
+    logging.info("Loading %s train images with mode %s" % (len(train_ids), mode))
     for n, id_ in tqdm(enumerate(train_ids), total=len(train_ids)):
         # Get the path and read it
         path = os.path.join(path_to_train, id_)
         path_to_img = os.path.join(path, 'images/', id_ + '.png')
-        x_train[n], _ = load_img(path_to_img, img_size=img_size, num_channels=num_channels)
+        x_train[n], _ = load_img(path_to_img, img_size=img_size, num_channels=num_channels, mode=mode)
         y_train[n] = load_mask(path, img_size=img_size)
         assert x_train[n].shape[:2] == y_train[n].shape[:2]
     # If we have a fixed image size, cast it to numpy
@@ -67,16 +88,16 @@ def load_train_data(path_to_train='../input/train/', img_size=None, num_channels
     return np.array(train_ids), np.array(x_train), np.array(y_train)
 
 
-def load_test_data(path_to_test='../input/test/', img_size=None, num_channels=3):
+def load_test_data(path_to_test='../input/test/', img_size=None, num_channels=3, mode="ycbcr"):
     test_ids = get_data_ids(path_to_test)
     x_test = [None for _ in test_ids]
     sizes_test = [None for _ in test_ids]
-    print('Getting and resizing test images ... ')
+    logging.info("Loading %s test images with mode %s" % (len(test_ids), mode))
     sys.stdout.flush()
     for n, id_ in tqdm(enumerate(test_ids), total=len(test_ids)):
         path = os.path.join(path_to_test, id_)
         path_to_img = os.path.join(path, 'images/', id_ + '.png')
-        x_test[n], sizes_test[n] = load_img(path_to_img, img_size=img_size, num_channels=num_channels)
+        x_test[n], sizes_test[n] = load_img(path_to_img, img_size=img_size, num_channels=num_channels, mode=mode)
 
     assert all(i is not None for i in x_test)
     assert all(i is not None for i in sizes_test)
@@ -101,7 +122,7 @@ def prob_to_rles(x, cutoff=0.5):
         yield rle_encoding(lab_img == i)
 
 
-def save_submission(test_ids, preds, sizes_test, save_name, resize_img=False):
+def save_submission(test_ids, preds, sizes_test, save_name, resize_img=False, cutoff=0.5):
     new_test_ids = []
     rles = []
     for n, id_ in enumerate(tqdm(test_ids)):
@@ -110,7 +131,7 @@ def save_submission(test_ids, preds, sizes_test, save_name, resize_img=False):
             pred = resize(preds[n], (orig_height, orig_width), preserve_range=True)
         else:
             pred = preds[n][:orig_height, :orig_width]
-        rle = list(prob_to_rles(pred))
+        rle = list(prob_to_rles(pred, cutoff=cutoff))
         rles += rle
         new_test_ids += ([id_] * len(rle))
 

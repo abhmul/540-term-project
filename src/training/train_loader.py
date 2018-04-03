@@ -20,6 +20,7 @@ with open(CONFIG_JSON, 'r') as config_json_file:
 
 def load_train_setup(train_id):
     config = CONFIGS[train_id]
+
     model = config["model_id"]
 
     batch_size = config["batch_size"]
@@ -27,9 +28,15 @@ def load_train_setup(train_id):
 
     seed = config["seed"]
 
-    return {"model": model,
-            "batch_size": batch_size,
-            "epochs": epochs,
-            "seed": seed,
-            "kfold": config.get("kfold"),
-            "img_size": config.get("img_size")}
+    new_config = {"model": model,
+                  "batch_size": batch_size,
+                  "epochs": epochs,
+                  "seed": seed,
+                  "kfold": config.get("kfold"),
+                  "split": config.get("split"),
+                  "img_size": config.get("img_size"),
+                  "augment": config.get("augment"),
+                  "augment_times": config.get("augment_times"),
+                  "img_mode": config.setdefault("img_mode", "rgb")}
+
+    return new_config

@@ -1,11 +1,33 @@
-from keras.layers import Conv2D, Dropout, MaxPooling2D, Input, UpSampling2D, concatenate, Activation, BatchNormalization
+import logging
+from keras.layers import Conv2D, Dropout, MaxPooling2D, Input, UpSampling2D, concatenate, Activation, BatchNormalization, Lambda
 from keras.models import Model
 from . import model_utils
+from . import losses
 
 
-def unet(num_filters=16, factor=2, optimizer="adam", loss="binary_crossentropy"):
-    inputs = Input((None, None, 3), name="input")
-    s = Activation('relu')(BatchNormalization()(Conv2D(num_filters, (1, 1), padding='same')(inputs)))
+def get_loss(loss):
+    loss_func = losses.loss_dict.get(loss)
+    assert loss_func is not None, "Cannot find loss %s" % loss
+    return loss_func
+
+
+def unet(num_filters=16, factor=2, optimizer="adam", loss="binary_crossentropy", img_size=(None, None),
+         num_channels=3, max_val=255., **kwargs):
+
+    settings_str = "\tnum_filters: {num_filters}\n" \
+                   "\tfactor: {factor}\n" \
+                   "\toptimizer: {optimizer}\n" \
+                   "\tloss: {loss}\n" \
+                   "\timg_size: {img_size}\n" \
+                   "\tnum_channels: {num_channels}\n" \
+                   "\tmax_val: {max_val}\n".format(num_filters=num_filters, factor=factor, optimizer=optimizer,
+                                                   loss=loss, img_size=img_size, num_channels=num_channels,
+                                                   max_val=max_val)
+
+    logging.info("Creating keras unet model with settings:\n" + settings_str)
+    inputs = Input(tuple(img_size) + (num_channels,), name="input")
+
+    s = BatchNormalization()(Conv2D(num_filters, (1, 1), padding='same')(Lambda(lambda x: (1./max_val) * x)(inputs)))
     c1 = Activation('relu')(BatchNormalization()(Conv2D(num_filters, (3, 3), padding='same')(s)))
     c1 = Dropout(0.1)(c1)
     c1 = Activation('relu')(BatchNormalization()(Conv2D(num_filters, (3, 3), padding='same')(c1)))
@@ -65,6 +87,6 @@ def unet(num_filters=16, factor=2, optimizer="adam", loss="binary_crossentropy")
     outputs = Conv2D(1, (1, 1), activation='sigmoid')(c9)
 
     model = Model(inputs=[inputs], outputs=[outputs])
-    model.compile(optimizer=optimizer, loss=loss, metrics=[model_utils.mean_iou])
+    model.compile(optimizer=optimizer, loss=get_loss(loss), metrics=[model_utils.mean_iou])
     model.summary()
     return model

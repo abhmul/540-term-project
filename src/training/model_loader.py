@@ -15,5 +15,5 @@ def build_model(name, **kwargs):
     return MODELS[name](**kwargs)
 
 
-def load_model(model_id):
-    return build_model(**CONFIGS[model_id])
+def load_model(model_id, **kwargs):
+    return build_model(**CONFIGS[model_id], **kwargs)
