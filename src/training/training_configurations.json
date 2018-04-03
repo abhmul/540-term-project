@@ -4,7 +4,29 @@
     "batch_size": 16,
     "epochs": 10,
     "seed": 7,
-    "kfold": 10,
+    "kfold": null,
     "img_size": [256, 256]
+  },
+
+  "train-unet-1": {
+    "model_id": "unet-1",
+    "batch_size": 16,
+    "epochs": 1,
+    "seed": 7,
+    "split": 0.2,
+    "img_size": [256, 256],
+    "augment": {
+      "rotation_range": 180,
+      "width_shift_range": 0.2,
+      "height_shift_range": 0.2,
+      "shear_range": 0.1,
+      "zoom_range": 0.1,
+      "fill_mode": "constant",
+      "cval": 0,
+      "horizontal_flip": true,
+      "vertical_flip": true
+    },
+    "augment_times": 10,
+    "img_mode": "ycbcr"
   }
 }
