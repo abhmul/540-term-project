@@ -1,9 +1,11 @@
 import argparse
 import logging
 import os
+from pprint import pprint
 
 import numpy as np
 from keras.callbacks import ModelCheckpoint
+from keras.models import load_model as reload_model_checkpoint
 from pyjet.data import NpDataset, DatasetGenerator
 from pyjet.preprocessing.image import ImageDataGenerator
 
@@ -20,18 +22,21 @@ parser.add_argument('--plot', action="store_true", help="Whether to plot the tra
 parser.add_argument('--num_completed', type=int, default=0, help="How many completed folds")
 parser.add_argument('--reload_model', action='store_true', help="Continues training from a saved model")
 parser.add_argument('--cutoff', type=float, default=0, help="Cutoff to use for producing submission")
+parser.add_argument('--use_iou', action='store_true', help="creates test predictions with iou checkpointed model.")
 
 logging.basicConfig(format='%(asctime)s : %(levelname)s : %(message)s', level=logging.INFO)
 
 PLOT = False
+CHECKPOINT = "../models/checkpoint.state"
 
 
 def create_filenames(train_id):
     model_file = os.path.join(safe_open_dir("../models/"), train_id + ".state")
+    model_iou_file = os.path.join(safe_open_dir("../models/"), train_id + "_iou" + ".state")
     log_file = os.path.join(safe_open_dir("../logs/"), train_id + ".txt")
     plot_file = os.path.join(safe_open_dir('../plots/'), 'loss_' + train_id + ".png")
     submission_file = os.path.join(safe_open_dir('../submissions/'), train_id + ".csv")
-    return model_file, log_file, plot_file, submission_file
+    return model_file, model_iou_file, log_file, plot_file, submission_file
 
 
 def train_model(model, train_id, train_data, val_data, epochs=10, batch_size=32, plot=False, reload_model=False,
@@ -44,6 +49,9 @@ def train_model(model, train_id, train_data, val_data, epochs=10, batch_size=32,
 
     # Set up the augmentation
     if augment is not None:
+        logging.info("Using augmentation with settings:")
+        pprint(augment)
+
         traingen = ImageDataGenerator(traingen, labels=True, augment_masks=True, **augment)
 
         # For debugging purposes
@@ -59,12 +67,15 @@ def train_model(model, train_id, train_data, val_data, epochs=10, batch_size=32,
         #     plt.show()
         #     raise ValueError()
 
-
-    model_file, log_file, plot_file, _ = create_filenames(train_id)
+    model_file, model_iou_file, log_file, plot_file, _ = create_filenames(train_id)
 
     # callbacks
     best_model = ModelCheckpoint(model_file, monitor="val_loss", verbose=1, save_best_only=True, save_weights_only=True)
-    callbacks = [best_model]
+    best_model_iou = ModelCheckpoint(model_iou_file, monitor="val_mean_iou", verbose=1, save_best_only=True,
+                                     save_weights_only=True, mode='max')
+    # This one will allow us to resume training
+    checkpoint = ModelCheckpoint(CHECKPOINT, verbose=1)
+    callbacks = [best_model, best_model_iou, checkpoint]
     # This will plot the losses while training
     if plot:
         callbacks.append(Plotter("loss", scale="log", save_to_file=plot_file, block_on_end=False))
@@ -73,7 +84,7 @@ def train_model(model, train_id, train_data, val_data, epochs=10, batch_size=32,
     # Setup the weights
     if reload_model:
         logging.info("Loading the model from %s to resume training" % model_file)
-        model.load_weights(model_file)
+        model = reload_model_checkpoint(CHECKPOINT)
     else:
         logging.info("Resetting model parameters")
         reset_model(model)
@@ -87,9 +98,12 @@ def train_model(model, train_id, train_data, val_data, epochs=10, batch_size=32,
     return model, history
 
 
-def test_model(model, train_id, test_data, batch_size, augment=None, augment_times=None):
+def test_model(model, train_id, test_data, batch_size, augment=None, augment_times=None, use_iou=False):
     testgen = DatasetGenerator(test_data, batch_size=batch_size, shuffle=False)
-    model_file, _, _, _ = create_filenames(train_id)
+    model_file, model_iou_file, _, _, _ = create_filenames(train_id)
+    if use_iou:
+        logging.info("Creating test predictions with model checkpointed with mean iou.")
+        model_file = model_iou_file
     # Initialize the model
     model.load_weights(model_file)
 
@@ -97,6 +111,9 @@ def test_model(model, train_id, test_data, batch_size, augment=None, augment_tim
     if augment is None or augment_times is None:
         return model.predict_generator(testgen, testgen.steps_per_epoch, verbose=1)
     else:
+        logging.info("Using test augmentation with settings:")
+        pprint(augment)
+        logging.info("Evaluating %s times" % augment_times)
         testgen = ImageDataGenerator(testgen, labels=False, augment_masks=False, **augment)
         preds = 0
         for i in range(augment_times):
@@ -119,8 +136,10 @@ def train(dataset, config, train_id, reload_model=False):
                                  plot=PLOT, augment=config["augment"],
                                  reload_model=reload_model)
     best_val = min(history.history['val_loss'])
+    best_mean_iou = min(history.history['val_mean_iou'])
 
     logging.info("Best val loss: %s" % best_val)
+    logging.info("Best val mean iou: %s" % best_mean_iou)
     return model
 
 
@@ -131,6 +150,7 @@ def kfold(dataset, config, train_id, num_completed=0, reload_model=False):
     logging.info("Total Data: %s samples" % len(dataset))
     logging.info("Running %sfold validation" % config["kfold"])
     best_vals = []
+    best_mean_ious = []
     completed = set(range(num_completed))
     for i, (train_data, val_data) in enumerate(dataset.kfold(k=config["kfold"], shuffle=True, seed=np.random.randint(2 ** 32))):
         if i in completed:
@@ -145,12 +165,14 @@ def kfold(dataset, config, train_id, num_completed=0, reload_model=False):
         # Set to false for the next time
         reload_model = False
         best_vals.append(min(history.history['val_loss']))
+        best_mean_ious.append(min(history.history['val_mean_iou']))
 
     logging.info("Average val loss: %s" % (sum(best_vals) / len(best_vals)))
+    logging.info("Average val mean iou: %s" % (sum(best_mean_ious) / len(best_mean_ious)))
     return model
 
 
-def test(dataset, test_img_sizes, config, train_id, model=None):
+def test(dataset, test_img_sizes, config, train_id, model=None, use_iou=False):
     if model is None:
         model = load_model(config["model"], img_size=config["img_size"], max_val=config["max_val"],
                            num_channels=config["num_channels"])
@@ -163,10 +185,11 @@ def test(dataset, test_img_sizes, config, train_id, model=None):
         for i in range(config["kfold"]):
             logging.info("Predicting fold %s/%s" % (i+1, config["kfold"]))
             predictions = predictions + test_model(model, train_id + "_fold%s" % i, dataset, config["batch_size"],
-                                                   augment=config["augment"], augment_times=config["augment_times"])
+                                                   augment=config["augment"], augment_times=config["augment_times"],
+                                                   use_iou=use_iou)
         predictions = predictions / config["kfold"]
 
-    _, _, _, submission_file = create_filenames(train_id)
+    _, _, _, _, submission_file = create_filenames(train_id)
     # Make the submission
     dsb.save_submission(dataset.ids, predictions, test_img_sizes, submission_file,
                         resize_img=config["img_size"] is not None)
@@ -192,6 +215,9 @@ if __name__ == "__main__":
     # Image loading and other setup values
     train_config["num_channels"] = 1 if train_config["img_mode"] == "gray" else 3
     train_config["max_val"] = 235. if train_config["img_mode"] == "ycbcr" else 255.
+
+    logging.info("Training configuration is:")
+    pprint(train_config)
 
     if args.train:
         # Load the train data
