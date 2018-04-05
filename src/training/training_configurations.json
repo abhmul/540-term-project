@@ -10,11 +10,33 @@
 
   "train-unet-1": {
     "model_id": "unet-1",
-    "batch_size": 16,
-    "epochs": 1,
+    "batch_size": 32,
+    "epochs": 100,
     "seed": 7,
-    "split": 0.2,
+    "kfold": 10,
     "img_size": [256, 256],
+    "augment": {
+      "rotation_range": 180,
+      "width_shift_range": 0.2,
+      "height_shift_range": 0.2,
+      "shear_range": 0.1,
+      "zoom_range": 0.1,
+      "fill_mode": "constant",
+      "cval": 0,
+      "horizontal_flip": true,
+      "vertical_flip": true
+    },
+    "augment_times": 0,
+    "img_mode": "ycbcr"
+  },
+
+  "train-unet-2": {
+    "model_id": "unet-1",
+    "batch_size": 8,
+    "epochs": 100,
+    "seed": 7,
+    "kfold": 10,
+    "img_size": [512, 512],
     "augment": {
       "rotation_range": 180,
       "width_shift_range": 0.2,
