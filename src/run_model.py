@@ -8,6 +8,7 @@ import numpy as np
 from sklearn.metrics import jaccard_similarity_score
 from keras.callbacks import ModelCheckpoint
 from keras.models import load_model as reload_model_checkpoint
+import keras.backend as K
 from pyjet.data import NpDataset, DatasetGenerator
 from pyjet.preprocessing.image import ImageDataGenerator
 
@@ -23,6 +24,7 @@ parser.add_argument('--test', action="store_true", help="Whether to run this scr
 parser.add_argument('--plot', action="store_true", help="Whether to plot the training loss")
 parser.add_argument('--num_completed', type=int, default=0, help="How many completed folds")
 parser.add_argument('--reload_model', action='store_true', help="Continues training from a saved model")
+parser.add_argument('--initial_epoch', type=int, default=0, help="Continues training from specified epoch")
 parser.add_argument('--cutoff', type=float, default=0.5, help="Cutoff to use for producing submission")
 parser.add_argument('--use_iou', action='store_true', help="creates test predictions with iou checkpointed model.")
 parser.add_argument('--test_debug', action='store_true', help="debugs the test output.")
@@ -31,6 +33,20 @@ logging.basicConfig(format='%(asctime)s : %(levelname)s : %(message)s', level=lo
 
 PLOT = False
 CHECKPOINT = "../models/checkpoint.state"
+
+
+def limit_mem():
+    cfg = K.tf.ConfigProto()
+    cfg.gpu_options.allow_growth = True
+    K.set_session(K.tf.Session(config=cfg))
+
+
+def clear_mem():
+    logging.info("Clearing keras model and tf session.")
+    sess = K.get_session()
+    sess.close()
+    limit_mem()
+    return
 
 
 def create_filenames(train_id):
@@ -70,7 +86,7 @@ def build_cache(train_id, model=None, config=None, val_data: NpDataset=None):
 
 
 def train_model(model, train_id, train_data, val_data, epochs=10, batch_size=32, plot=False, reload_model=False,
-                augment=None):
+                augment=None, initial_epoch=0):
     logging.info("Train Data: %s samples" % len(train_data))
     logging.info("Val Data: %s samples" % len(val_data))
 
@@ -104,7 +120,7 @@ def train_model(model, train_id, train_data, val_data, epochs=10, batch_size=32,
     best_model_iou = ModelCheckpoint(model_iou_file, monitor="val_mean_iou", verbose=1, save_best_only=True,
                                      save_weights_only=True, mode='max')
     # This one will allow us to resume training
-    checkpoint = ModelCheckpoint(CHECKPOINT, verbose=1)
+    checkpoint = ModelCheckpoint(CHECKPOINT, verbose=1, save_weights_only=False)
     callbacks = [best_model, best_model_iou, checkpoint]
     # This will plot the losses while training
     if plot:
@@ -114,16 +130,18 @@ def train_model(model, train_id, train_data, val_data, epochs=10, batch_size=32,
     # Setup the weights
     if reload_model:
         logging.info("Loading the model from %s to resume training" % model_file)
-        model = reload_model_checkpoint(CHECKPOINT)
-    else:
-        logging.info("Resetting model parameters")
-        reset_model(model)
+        loss = model.loss
+        metrics = model.metrics
+        model = None
+        clear_mem()
+        model = reload_model_checkpoint(CHECKPOINT,
+                                        custom_objects={custom.__name__: custom for custom in [loss] + metrics})
 
     # And finally train
     history = model.fit_generator(traingen, steps_per_epoch=traingen.steps_per_epoch,
                                   epochs=epochs, callbacks=callbacks,
                                   validation_data=valgen,
-                                  validation_steps=valgen.steps_per_epoch)
+                                  validation_steps=valgen.steps_per_epoch, initial_epoch=initial_epoch)
 
     # Get the validation weights
     logging.info("Calculating validation predictions")
@@ -195,8 +213,9 @@ def cross_validate_cutoff(preds, labels, train_id):
     return cutoffs[cutoff_ind]
 
 
-def train(dataset, config, train_id, reload_model=False):
+def train(dataset, config, train_id, reload_model=False, initial_epoch=0):
     # Initialize the model
+    clear_mem()
     model = load_model(config["model"], img_size=config["img_size"], max_val=config["max_val"],
                        num_channels=config["num_channels"])
     logging.info("Total Data: %s samples" % len(dataset))
@@ -208,7 +227,7 @@ def train(dataset, config, train_id, reload_model=False):
                                         train_data, val_data,
                                         epochs=config["epochs"], batch_size=config["batch_size"],
                                         plot=PLOT, augment=config["augment"],
-                                        reload_model=reload_model)
+                                        reload_model=reload_model, initial_epoch=initial_epoch)
     best_val = min(history.history['val_loss'])
     best_mean_iou = min(history.history['val_mean_iou'])
 
@@ -225,8 +244,9 @@ def train(dataset, config, train_id, reload_model=False):
     return model, {"cutoff": best_cutoff, "iou_cutoff": best_iou_cutoff}
 
 
-def kfold(dataset, config, train_id, num_completed=0, reload_model=False):
+def kfold(dataset, config, train_id, num_completed=0, reload_model=False, initial_epoch=0):
     # Initialize the model
+    clear_mem()
     model = load_model(config["model"], img_size=config["img_size"], max_val=config["max_val"],
                        num_channels=config["num_channels"])
     logging.info("Total Data: %s samples" % len(dataset))
@@ -246,15 +266,17 @@ def kfold(dataset, config, train_id, num_completed=0, reload_model=False):
                                             train_data, val_data,
                                             epochs=config["epochs"], batch_size=config["batch_size"],
                                             plot=PLOT, augment=config["augment"],
-                                            reload_model=reload_model)
+                                            reload_model=reload_model, initial_epoch=initial_epoch)
         # Set to false for the next time
         reload_model = False
+        initial_epoch = 0
         best_vals.append(min(history.history['val_loss']))
         best_mean_ious.append(min(history.history['val_mean_iou']))
         caches.append(cache)
 
         # Reset the model
         model = None
+        clear_mem()
         model = load_model(config["model"], img_size=config["img_size"], max_val=config["max_val"],
                            num_channels=config["num_channels"])
 
@@ -345,10 +367,11 @@ if __name__ == "__main__":
         train_dataset = NpDataset(x=x_train, y=y_train, ids=train_ids)
         # train the models
         if not train_config["kfold"]:
-            trained_model, train_cache = train(train_dataset, train_config, args.train_id, reload_model=args.reload_model)
+            trained_model, train_cache = train(train_dataset, train_config, args.train_id,
+                                               reload_model=args.reload_model, initial_epoch=args.initial_epoch)
         else:
             trained_model, train_cache = kfold(train_dataset, train_config, args.train_id, num_completed=args.num_completed,
-                                  reload_model=args.reload_model)
+                                               reload_model=args.reload_model, initial_epoch=args.initial_epoch)
 
     if args.test:
         # Load the test data
