@@ -48,7 +48,7 @@
       "horizontal_flip": true,
       "vertical_flip": true
     },
-    "augment_times": 10,
+    "augment_times": 0,
     "img_mode": "ycbcr"
   }
 }
