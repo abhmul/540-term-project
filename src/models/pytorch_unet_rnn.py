@@ -264,15 +264,15 @@ class UnetRNN(SLModel):
 
     def cast_target_to_torch(self, targets, volatile=False):
         # keep these sparse
-        targets["mask"] = Variable((torch.from_numpy(targets["mask"])),
-                                   requires_grad=False, volatile=volatile).contiguous()
-        targets["segment"] = Variable((torch.from_numpy(targets["segment"])),
-                                      requires_grad=False, volatile=volatile).contiguous()
-        if J.use_cuda:
-            targets["mask"] = targets["mask"].cuda()
-            targets["segment"] = targets["segment"].cuda()
-        # targets["mask"] = super().cast_target_to_torch(targets["mask"], volatile=volatile)
-        # targets["segment"] = super().cast_target_to_torch(targets["segment"], volatile=volatile)
+        # targets["mask"] = Variable((torch.from_numpy(targets["mask"])),
+        #                            requires_grad=False, volatile=volatile).contiguous()
+        # targets["segment"] = Variable((torch.from_numpy(targets["segment"])),
+        #                               requires_grad=False, volatile=volatile).contiguous()
+        # if J.use_cuda:
+        #     targets["mask"] = targets["mask"].cuda()
+        #     targets["segment"] = targets["segment"].cuda()
+        targets["mask"] = super().cast_target_to_torch(targets["mask"], volatile=volatile).contiguous()
+        targets["segment"] = super().cast_target_to_torch(targets["segment"], volatile=volatile).contiguous()
         return targets
 
     def call(self, inputs):
