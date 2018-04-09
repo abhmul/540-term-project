@@ -29,6 +29,7 @@ parser.add_argument('--initial_epoch', type=int, default=0, help="Continues trai
 parser.add_argument('--cutoff', type=float, default=0.5, help="Cutoff to use for producing submission")
 parser.add_argument('--use_iou', action='store_true', help="creates test predictions with iou checkpointed model.")
 parser.add_argument('--test_debug', action='store_true', help="debugs the test output.")
+parser.add_argument('--train_debug', action='store_true', help="debugs the test output.")
 
 logging.basicConfig(format='%(asctime)s : %(levelname)s : %(message)s', level=logging.INFO)
 
@@ -366,7 +367,8 @@ if __name__ == "__main__":
                                                           img_size=train_config["img_size"],
                                                           num_channels=train_config["num_channels"],
                                                           mode=train_config["img_mode"],
-                                                          return_segments=train_config["segments"])
+                                                          return_segments=train_config["segments"],
+                                                          load_n=(10 if args.train_debug else None))
         if train_config["segments"]:
             train_dataset = dsb.MaskSegmentDataset(x=x_train, y=y_train, ids=train_ids)
         else:
