@@ -81,7 +81,7 @@ class UNet(nn.Module):
         self.out = Conv2D(num_filters9, 1, kernel_size=1, activation='linear', fix_inputs=False)
 
     def forward(self, x):
-
+        
         x = self.resample(x.permute(0, 3, 2, 1))
         x = self.c1_1(x)
         x = self.c1_2(x)
@@ -144,8 +144,8 @@ class UnetRNNModule(nn.Module):
         self.height = img_size[0]
         self.width = img_size[1]
         self.num_channels = num_channels
-        self.rnn1_output = Variable(J.zeros(1, self.height, self.width))
-        self.rnn2_output = Variable(J.zeros(1, self.width, self.height))
+        self.rnn1_output = None
+        self.rnn2_output = None
 
         self.rnn1 = rnn_func(self.width * (num_channels + 2), self.width, return_sequences=True)
         self.rnn2 = rnn_func(self.height * (num_channels + 2), self.height, return_sequences=True)
@@ -170,6 +170,9 @@ class UnetRNNModule(nn.Module):
         return soft_iou >= self.stop_criterion
 
     def forward(self, inputs, num_nuclei=None):
+        self.rnn1_output = Variable(J.zeros(1, self.height, self.width))
+        self.rnn2_output = Variable(J.zeros(1, self.width, self.height))
+        
         # num_nuclei is a longtensor of size B that holds number of images in the image
         batch_size = inputs.size(0)
         # inputs is B x H x W x 3
@@ -260,6 +263,10 @@ class UnetRNN(SLModel):
 
         x = super().cast_input_to_torch(x, volatile=volatile)
         num_nuclei = J.from_numpy(num_nuclei).long()
+        #if J.use_cuda:
+        #    print("converting x to cuda")
+        #    x = x.cuda()
+        #    num_nuclei = num_nuclei.cuda()
         return x, num_nuclei
 
     def cast_target_to_torch(self, targets, volatile=False):
@@ -273,6 +280,9 @@ class UnetRNN(SLModel):
         #     targets["segment"] = targets["segment"].cuda()
         targets["mask"] = super().cast_target_to_torch(targets["mask"], volatile=volatile).contiguous()
         targets["segment"] = super().cast_target_to_torch(targets["segment"], volatile=volatile).contiguous()
+        if J.use_cuda:
+            targets["mask"] = targets["mask"].cuda()
+            targets["segment"] = targets["segment"].cuda()
         return targets
 
     def call(self, inputs):

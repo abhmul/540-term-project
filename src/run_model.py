@@ -12,7 +12,6 @@ import keras.backend as K
 from pyjet.data import NpDataset, DatasetGenerator
 from pyjet.preprocessing.image import ImageDataGenerator
 import pyjet.backend as J
-J.use_cuda = False
 
 from training import load_model, load_train_setup
 from models.model_utils import reset_model
@@ -122,8 +121,8 @@ def train_model(model, train_id, train_data, val_data, epochs=10, batch_size=32,
     best_model_iou = ModelCheckpoint(model_iou_file, monitor="val_mean_iou", verbose=1, save_best_only=True,
                                      save_weights_only=True, mode='max')
     # This one will allow us to resume training
-    checkpoint = ModelCheckpoint(CHECKPOINT, verbose=1, save_weights_only=False)
-    callbacks = [best_model, best_model_iou, checkpoint]
+    # checkpoint = ModelCheckpoint(CHECKPOINT, verbose=1, save_weights_only=False)
+    callbacks = [best_model, best_model_iou] #, checkpoint]
     # This will plot the losses while training
     if plot:
         callbacks.append(Plotter("loss", scale="log", save_to_file=plot_file, block_on_end=False))
@@ -131,6 +130,7 @@ def train_model(model, train_id, train_data, val_data, epochs=10, batch_size=32,
 
     # Setup the weights
     if reload_model:
+        raise NotImplementedError("Reloading models is nor working yet")
         logging.info("Loading the model from %s to resume training" % model_file)
         loss = model.loss
         metrics = model.metrics

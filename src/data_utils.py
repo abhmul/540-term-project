@@ -102,7 +102,7 @@ def load_mask(path_to_masks, img_size=None, return_segments=False):
 
 
 def load_train_data(path_to_train='../input/train/', img_size=None, num_channels=3, mode="ycbcr",
-                    return_segments=False, load_n=10):
+                    return_segments=False, load_n=None):
     train_ids = get_data_ids(path_to_train)
     train_ids = train_ids[:load_n]
     x_train = [None for _ in train_ids]
@@ -111,8 +111,6 @@ def load_train_data(path_to_train='../input/train/', img_size=None, num_channels
 
     logging.info("Loading %s train images with mode %s" % (len(train_ids), mode))
     for n, id_ in tqdm(enumerate(train_ids), total=len(train_ids)):
-        if load_n is not None and n >= load_n:
-            break
         # Get the path and read it
         path = os.path.join(path_to_train, id_)
         path_to_img = os.path.join(path, 'images/', id_ + '.png')
