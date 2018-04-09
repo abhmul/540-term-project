@@ -1,5 +1,6 @@
 import logging
-from keras.layers import Conv2D, Dropout, MaxPooling2D, Input, UpSampling2D, concatenate, Activation, BatchNormalization, Lambda
+from keras.layers import Conv2D, Dropout, MaxPooling2D, Input, UpSampling2D, concatenate, Activation, BatchNormalization, Lambda, \
+    CuDNNLSTM, CuDNNGRU
 from keras.models import Model
 from . import model_utils
 from . import losses
@@ -12,7 +13,7 @@ def get_loss(loss):
 
 
 def unet(num_filters=16, factor=2, optimizer="adam", loss="binary_crossentropy", img_size=(None, None),
-         num_channels=3, max_val=255., **kwargs):
+         num_channels=3, max_val=255., compile=True, **kwargs):
 
     settings_str = "\tnum_filters: {num_filters}\n" \
                    "\tfactor: {factor}\n" \
@@ -87,6 +88,7 @@ def unet(num_filters=16, factor=2, optimizer="adam", loss="binary_crossentropy",
     outputs = Conv2D(1, (1, 1), activation='sigmoid')(c9)
 
     model = Model(inputs=[inputs], outputs=[outputs])
-    model.compile(optimizer=optimizer, loss=get_loss(loss), metrics=[model_utils.mean_iou])
+    if compile:
+        model.compile(optimizer=optimizer, loss=get_loss(loss), metrics=[model_utils.mean_iou])
     model.summary()
     return model

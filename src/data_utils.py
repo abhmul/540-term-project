@@ -13,6 +13,8 @@ from skimage.color import rgb2ycbcr, rgb2gray
 from skimage.transform import resize
 from skimage.morphology import label
 
+from pyjet.data import NpDataset
+
 
 # Much of this code was based on the kernel https://www.kaggle.com/keegil/keras-u-net-starter-lb-0-277
 
@@ -49,7 +51,8 @@ def load_img(path_to_img, img_size=None, num_channels=3, mode="ycbcr", normalize
     return img, orig_img_shape
 
 
-def load_mask(path_to_masks, img_size=None):
+def load_mask(path_to_masks, img_size=None, return_segments=False):
+    segments = []
     if img_size is None:
         mask = None
     else:
@@ -62,29 +65,79 @@ def load_mask(path_to_masks, img_size=None):
             mask = np.zeros(mask_.shape, dtype=np.bool)[..., np.newaxis]
         if img_size is not None:
             mask_ = resize(mask_, img_size, mode='constant', preserve_range=True)
+        segments.append(mask_)
         mask_ = np.expand_dims(mask_, axis=-1)
         # This will combine the masks
         mask = np.maximum(mask, mask_).astype(np.bool)
+    # Combine the segments
+    segments = np.stack(segments, axis=-1).astype(np.bool)
+
+
+    # Sort the segments
+    num_segments = segments.shape[-1]
+    # Get the first 1 for each
+    first_ones = []
+    for i in range(num_segments):
+        assert np.max(segments[..., i]) in {1, 0}
+        where_ones = np.where(segments[..., i])
+        assert len(where_ones) == 2
+        assert len(where_ones[0]) > 0
+        first_ones.append(sorted(zip(where_ones[0], where_ones[1]))[0])
+    sorted_inds = sorted(range(len(first_ones)), key=lambda i: first_ones[i])
+
+    # temp_segments = segments.astype(np.bool, order="C").reshape(-1, num_segments)
+    # Find the segment number for first 1 in first axis
+    # sorted_inds = np.argsort([np.argmin(np.where(temp_segments[:, i])[0]) for i in range(num_segments)])
+    segments = segments[..., sorted_inds]
+
+    # DEBUG
+    # import matplotlib.pyplot as plt
+    # for i in range(num_segments):
+    #     plt.imshow(segments[..., i], cmap="gray")
+    #     plt.show()
+
+    if return_segments:
+        return mask, segments
     return mask
 
 
-def load_train_data(path_to_train='../input/train/', img_size=None, num_channels=3, mode="ycbcr"):
+def load_train_data(path_to_train='../input/train/', img_size=None, num_channels=3, mode="ycbcr",
+                    return_segments=False, load_n=10):
     train_ids = get_data_ids(path_to_train)
+    train_ids = train_ids[:load_n]
     x_train = [None for _ in train_ids]
     y_train = [None for _ in train_ids]
+    segments_train = [None for _ in train_ids]
 
     logging.info("Loading %s train images with mode %s" % (len(train_ids), mode))
     for n, id_ in tqdm(enumerate(train_ids), total=len(train_ids)):
+        if load_n is not None and n >= load_n:
+            break
         # Get the path and read it
         path = os.path.join(path_to_train, id_)
         path_to_img = os.path.join(path, 'images/', id_ + '.png')
         x_train[n], _ = load_img(path_to_img, img_size=img_size, num_channels=num_channels, mode=mode)
-        y_train[n] = load_mask(path, img_size=img_size)
-        assert x_train[n].shape[:2] == y_train[n].shape[:2]
+        y_train[n], segments = load_mask(path, img_size=img_size, return_segments=return_segments)
+
+        # print("=======")
+        # print(x_train[n].shape)
+        # print(y_train[n].shape)
+        # print(segments.shape)
+        # Stack the segments with the mask
+        segments_train[n] = np.concatenate([y_train[n], segments], axis=-1)
+        assert x_train[n].shape[:2] == y_train[n].shape[:2] == segments_train[n].shape[:2]
     # If we have a fixed image size, cast it to numpy
     if img_size is not None:
         x_train = np.stack(x_train)
         y_train = np.stack(y_train)
+    # Stack the segments onto the mask
+    if return_segments:
+        # For some reason need to do it this way
+        new_segments_train = np.empty(len(segments_train), dtype=np.ndarray)
+        for i in range(len(segments_train)):
+            new_segments_train[i] = segments_train[i]
+
+        return np.array(train_ids), np.array(x_train), new_segments_train
     return np.array(train_ids), np.array(x_train), np.array(y_train)
 
 
@@ -143,3 +196,27 @@ def save_submission(test_ids, preds, sizes_test, save_name, resize_img=False, cu
 
 
 warnings.filterwarnings('ignore', category=UserWarning, module='skimage')
+
+
+class MaskSegmentDataset(NpDataset):
+
+    def create_batch(self, batch_indicies):
+        batch = super().create_batch(batch_indicies)
+        if not self.output_labels:
+            return batch, None
+        x, y = batch
+        # print(y.shape)
+        # Count up the number of nuclei and create a new y
+        num_nuclei = np.array([y[i].shape[-1] - 1 for i in range(len(y))])
+        # Add 1 for the combined mask
+        pad_length = max(num_nuclei) + 1
+        padded_y = np.zeros(y.shape[0:1] + y[0].shape[:-1] + (pad_length,), dtype=np.uint8)
+        for i in range(len(y)):
+            padded_y[i, ..., :y[i].shape[-1]] = y[i]
+
+        # Otherwise set up the targets dict
+        targets = {"mask": padded_y[..., :1], "segment": padded_y[..., 1:]}
+        # Count the number of nuclei
+        return (x, num_nuclei), targets
+
+

@@ -11,6 +11,8 @@ from keras.models import load_model as reload_model_checkpoint
 import keras.backend as K
 from pyjet.data import NpDataset, DatasetGenerator
 from pyjet.preprocessing.image import ImageDataGenerator
+import pyjet.backend as J
+J.use_cuda = False
 
 from training import load_model, load_train_setup
 from models.model_utils import reset_model
@@ -363,8 +365,12 @@ if __name__ == "__main__":
         train_ids, x_train, y_train = dsb.load_train_data(path_to_train="../input/train/",
                                                           img_size=train_config["img_size"],
                                                           num_channels=train_config["num_channels"],
-                                                          mode=train_config["img_mode"])
-        train_dataset = NpDataset(x=x_train, y=y_train, ids=train_ids)
+                                                          mode=train_config["img_mode"],
+                                                          return_segments=train_config["segments"])
+        if train_config["segments"]:
+            train_dataset = dsb.MaskSegmentDataset(x=x_train, y=y_train, ids=train_ids)
+        else:
+            train_dataset = NpDataset(x=x_train, y=y_train, ids=train_ids)
         # train the models
         if not train_config["kfold"]:
             trained_model, train_cache = train(train_dataset, train_config, args.train_id,
@@ -379,7 +385,10 @@ if __name__ == "__main__":
                                                           img_size=train_config["img_size"],
                                                           num_channels=train_config["num_channels"],
                                                           mode=train_config["img_mode"])
-        test_dataset = NpDataset(x=x_test, ids=test_ids)
+        if train_config["segments"]:
+            test_dataset = dsb.MaskSegmentDataset(x=x_test, ids=test_ids)
+        else:
+            test_dataset = NpDataset(x=x_test, ids=test_ids)
         if train_cache is None:
             cutoff = args.cutoff
         else:

@@ -50,5 +50,18 @@
     },
     "augment_times": 0,
     "img_mode": "ycbcr"
+  },
+
+  "train-unet-rnn-1": {
+    "model_id": "unet-rnn-1",
+    "batch_size": 32,
+    "epochs": 100,
+    "seed": 7,
+    "kfold": null,
+    "split": 0.2,
+    "img_size": [256, 256],
+    "augment_times": 0,
+    "img_mode": "ycbcr",
+    "segments": true
   }
 }

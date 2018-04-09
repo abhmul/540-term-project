@@ -37,6 +37,7 @@ def load_train_setup(train_id):
                   "img_size": config.get("img_size"),
                   "augment": config.get("augment"),
                   "augment_times": config.get("augment_times"),
-                  "img_mode": config.setdefault("img_mode", "rgb")}
+                  "img_mode": config.setdefault("img_mode", "rgb"),
+                  "segments": config.setdefault("segments", False)}
 
     return new_config

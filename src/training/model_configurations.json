@@ -13,5 +13,11 @@
     "factor": 2,
     "optimizer": "adam",
     "loss": "weighted_bce_dice_loss"
+  },
+
+  "unet-rnn-1": {
+    "name": "unet-rnn",
+    "num_filters": 16,
+    "factor": 2
   }
 }

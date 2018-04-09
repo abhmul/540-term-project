@@ -1,9 +1,11 @@
 import json
 
 from models import keras_unet
+from models import pytorch_unet_rnn
 
 MODELS = {
-    "unet": keras_unet.unet
+    "unet": keras_unet.unet,
+    "unet-rnn": pytorch_unet_rnn.UnetRNN
 }
 
 CONFIG_JSON = "training/model_configurations.json"

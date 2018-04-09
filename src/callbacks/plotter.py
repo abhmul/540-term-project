@@ -39,13 +39,15 @@ class Plotter(Callback):
         self.y_train = []
         self.y_val = []
 
-    def on_train_end(self, logs={}):
+    def on_train_end(self, logs=None):
         plt.ioff()
         if self.block_on_end:
             plt.show()
         return
 
-    def on_epoch_end(self, epoch, logs={}):
+    def on_epoch_end(self, epoch, logs=None):
+        logs = logs or {}
+
         # Set up the plot
         self.ax.clear()
         self.fig.suptitle(self.title)
