@@ -63,5 +63,17 @@
     "augment_times": 0,
     "img_mode": "ycbcr",
     "segments": true
+  },
+  "train-unet-3": {
+    "model_id": "unet-pytorch",
+    "batch_size": 32,
+    "epochs": 100,
+    "seed": 7,
+    "kfold": null,
+    "split": 0.15,
+    "img_size": [256, 256],
+    "augment_times": 0,
+    "img_mode": "ycbcr",
+    "segments": false
   }
 }

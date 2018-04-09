@@ -5,7 +5,8 @@ from models import pytorch_unet_rnn
 
 MODELS = {
     "unet": keras_unet.unet,
-    "unet-rnn": pytorch_unet_rnn.UnetRNN
+    "unet-rnn": pytorch_unet_rnn.UnetRNN,
+    "unet-pytorch": pytorch_unet_rnn.UNet
 }
 
 CONFIG_JSON = "training/model_configurations.json"

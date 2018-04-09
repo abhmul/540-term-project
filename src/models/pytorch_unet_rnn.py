@@ -15,7 +15,7 @@ from . import pytorch_losses
 from . import mean_iou
 
 
-class UNet(nn.Module):
+class UNetModule(nn.Module):
 
     def __init__(self, num_filters=16, factor=2, num_channels=3, max_val=255.):
         super(UNet, self).__init__()
@@ -239,10 +239,12 @@ class UnetRNNModule(nn.Module):
 class UnetRNN(SLModel):
 
     def __init__(self, rnn_type='lstm', num_filters=16, factor=2, num_channels=3, max_val=255., img_size=(256, 256),
-                 stop_criterion=0.99):
+                 stop_criterion=0.99, unet_path=""):
         super(UnetRNN, self).__init__()
-        self.unet_rnn = UnetRNNModule(rnn_type='lstm', num_filters=16, factor=2, num_channels=3, max_val=255.,
-                                      img_size=(256, 256), stop_criterion=0.99)
+        self.unet_rnn = UnetRNNModule(rnn_type=rnn_type, num_filters=num_filters, factor=factor, num_channels=num_channels, max_val=max_val,
+                                      img_size=img_size, stop_criterion=stop_criterion)
+        if unet_path:
+            self.unet_rnn.unet.load_state_dict(torch.load(unet_path))
 
         self.height = self.unet_rnn.height
         self.width = self.unet_rnn.width
@@ -312,3 +314,66 @@ class UnetRNN(SLModel):
         rnn_loss_weights = self.rnn_loss_weights.view(-1, 1, 1)
         rnn_target = targets["segment"].view(-1, self.height, self.width)
         return mean_iou.mean_iou(F.sigmoid(rnn_loss) * rnn_loss_weights, rnn_target)
+
+
+class UNet(SLModel):
+
+    def __init__(self, num_filters=16, factor=2, num_channels=3, max_val=255.):
+        super(UNet, self).__init__()
+        self.unet= UNetModule(num_filters=num_filters, factor=factor,
+                                   num_channels=num_channels, max_val=max_val)
+        # if unet_path:
+        #     self.unet_rnn.unet.load_state_dict(torch.load(unet_path))
+
+        self.height = self.unet_rnn.height
+        self.width = self.unet_rnn.width
+        # Create the loss function
+        self.register_loss_function(self.unet_bce_dice)
+
+        self.register_metric_function(self.unet_mean_iou)
+        self.out_masks, self.unet_loss = [None]*2
+
+        self.add_optimizer(optim.Adam(param for param in self.parameters() if param.requires_grad), "adam")
+
+    def cast_input_to_torch(self, inputs, volatile=False):
+        # x, num_nuclei = inputs
+        x = inputs
+        # Fix x
+        x = (x / self.unet.max_val).astype(np.float32)
+
+        x = super().cast_input_to_torch(x, volatile=volatile)
+        # num_nuclei = J.from_numpy(num_nuclei).long()
+        #if J.use_cuda:
+        #    print("converting x to cuda")
+        #    x = x.cuda()
+        #    num_nuclei = num_nuclei.cuda()
+        return x
+
+    # def cast_target_to_torch(self, targets, volatile=False):
+    #     # keep these sparse
+    #     # targets["mask"] = Variable((torch.from_numpy(targets["mask"])),
+    #     #                            requires_grad=False, volatile=volatile).contiguous()
+    #     # targets["segment"] = Variable((torch.from_numpy(targets["segment"])),
+    #     #                               requires_grad=False, volatile=volatile).contiguous()
+    #     # if J.use_cuda:
+    #     #     targets["mask"] = targets["mask"].cuda()
+    #     #     targets["segment"] = targets["segment"].cuda()
+    #     targets["mask"] = super().cast_target_to_torch(targets["mask"], volatile=volatile).contiguous()
+    #     # targets["segment"] = super().cast_target_to_torch(targets["segment"], volatile=volatile).contiguous()
+    #     # if J.use_cuda:
+    #     #     targets["mask"] = targets["mask"].cuda()
+    #     #     targets["segment"] = targets["segment"].cuda()
+    #     return targets
+
+    def call(self, inputs):
+        x = inputs
+        self.out_masks, self.unet_loss = self.unet(x)
+        return self.out_masks
+
+    def unet_bce_dice(self, targets):
+        # Unet loss is B x H x W x 1
+        return pytorch_losses.weighted_bce_dice_loss(self.unet_loss, targets)
+
+
+    def unet_mean_iou(self, targets):
+        return mean_iou.mean_iou(F.sigmoid(self.unet_loss), targets)

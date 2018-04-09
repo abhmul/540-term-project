@@ -19,5 +19,11 @@
     "name": "unet-rnn",
     "num_filters": 16,
     "factor": 2
+  },
+
+  "unet-pytorch-1": {
+    "name": "unet-pytorch",
+    "num_filters": 16,
+    "factor": 2
   }
 }
