@@ -115,7 +115,7 @@ def load_train_data(path_to_train='../input/train/', img_size=None, num_channels
         path = os.path.join(path_to_train, id_)
         path_to_img = os.path.join(path, 'images/', id_ + '.png')
         x_train[n], _ = load_img(path_to_img, img_size=img_size, num_channels=num_channels, mode=mode)
-        y_train[n], segments = load_mask(path, img_size=img_size, return_segments=return_segments)
+        y_train[n], segments = load_mask(path, img_size=img_size, return_segments=True)
 
         # print("=======")
         # print(x_train[n].shape)
