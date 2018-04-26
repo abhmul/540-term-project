@@ -26,7 +26,7 @@ Place the testing data into a folder on the top level of the repository called `
 Run the command from the `src` directory
 
 ```bash
-python3 run_model.py train-unet-1 --train --test
+python3 run_model.py train-unet-1 --test
 ```
 
 to generate a submission. The submission can be found in the `submissions` folder under the name `train-unet-1.csv`
