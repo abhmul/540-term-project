@@ -19,14 +19,14 @@ In addition, the following packages are also required
 
 ## Setting up the data
 
-Place the testing data into a folder on the top level of the repository called `input/test` in the same format as Kaggle's Data Science Bowl competition's datasets.
+Place the testing data into a folder on the top level of the repository called `input/test` and the training data in `input/train` in the same format as Kaggle's Data Science Bowl competition's datasets.
 
 ## Creating the submission
 
 Run the command from the `src` directory
 
 ```bash
-python3 run_model.py train-unet-1 --test
+python3 run_model.py train-unet-1 --train --test
 ```
 
 to generate a submission. The submission can be found in the `submissions` folder under the name `train-unet-1.csv`
